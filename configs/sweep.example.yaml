@@ -1,0 +1,11 @@
+# Decoding-only settings to compare BEFORE any agent run (scripts/decode_sweep.py). Edit for your model.
+- name: greedy_default
+  protocol: {}
+- name: greedy_rep1.1
+  protocol: {repetition_penalty: 1.1}
+- name: greedy_norepeat8
+  protocol: {no_repeat_ngram_size: 8}
+- name: greedy_maxside1024
+  protocol: {image_max_side: 1024}
+- name: table_markdown_prompt
+  tasks: {table: {prompt: "Extract the table as a markdown table. Put the header row first."}}

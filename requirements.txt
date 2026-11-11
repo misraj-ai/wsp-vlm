@@ -1,0 +1,14 @@
+torch>=2.4
+torchvision            # needed by Qwen-family image/video processors
+transformers>=4.57     # tested with 5.22
+safetensors
+tokenizers
+pillow
+numpy
+pyyaml
+rapidfuzz              # fast edit distance (a pure-Python fallback exists)
+anthropic              # Claude backend
+# openai               # only for the openai_compat backend (other agents, e.g. Astra)
+# pytest               # tests
+# For Qwen3.5 on GPU, much faster linear-attention kernels:
+# causal-conv1d, flash-linear-attention

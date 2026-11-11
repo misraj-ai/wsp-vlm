@@ -1,0 +1,16 @@
+# Plumbing test on a tiny random VLM, CPU only. From the repo root:
+#   python scripts/make_toy.py --out toy                  (or --arch qwen35 --out toy_qwen35)
+#   python scripts/run_agent.py --config configs/toy.yaml
+run_name: toy
+run_dir: runs/toy
+model: {path: toy/model, dtype: float32, device: cpu}
+protocol: {max_new_tokens: 24, batch_size: 4}
+tasks:
+  ocr: {prompt: "Extract all text in this image.", metric: cer}
+  arabic: {prompt: "استخرج النص العربي من الصورة.", metric: cer, arabic: true}
+  table: {prompt: "Extract the table as HTML.", metric: table}
+  handwriting: {prompt: "Transcribe the handwriting.", metric: cer, arabic: true}
+practice: {dir: toy/data/public}
+budget: {passes: 6, python_runs: 30, max_turns: 40}
+limits: {gen_max_items: 32, gen_both_max_items: 16, tf_max_items: 32, kernel_timeout_s: 120}
+agent: {backend: scripted, script: tests/mock_agent.py, handoff_every_turns: 6}

@@ -1,0 +1,86 @@
+# One agent run. Copy this file per condition and seed (or override with --set on the command line).
+# Everything not set here takes the defaults in wsp/config.py.
+
+run_name: claude_b25_s1
+run_dir: runs/claude_b25_s1
+seed: 1                      # fixes the DEV/HOLDOUT split; keep it the same across conditions you compare
+weights_cache: cache/base_weights   # exported once, shared read-only by every run of this base model
+
+model:
+  path: <hf-id-or-local-dir> # the ~1B VLM (chosen after the pilot)
+  revision: <commit-sha>     # pin it: the private evaluation checks the base weights hash
+  dtype: bfloat16
+  device: cuda
+  trust_remote_code: false
+  attn_implementation: null  # "eager" if you want to allow attention-pattern reads (slower)
+  chat_template_kwargs: {}   # e.g. {enable_thinking: false} for Qwen3.5-style templates
+  discovery: {}              # regex overrides if discovery picks the wrong modules (see README)
+
+# Fixed BEFORE any agent run with scripts/decode_sweep.py; identical for every condition and for the private eval.
+protocol:
+  max_new_tokens: 4096
+  do_sample: false
+  repetition_penalty: 1.0
+  no_repeat_ngram_size: 0
+  image_max_side: 1540
+  batch_size: 16
+  seed: 0
+  system_prompt: null
+
+tasks:
+  ocr:
+    prompt: "Extract all the text in this image, in reading order. Output plain text only."
+    metric: cer
+  arabic:
+    prompt: "استخرج كل النص الموجود في الصورة بترتيب القراءة. أخرج النص فقط."
+    metric: cer
+    arabic: true
+  table:
+    prompt: "Extract the table in this image as HTML. Use <th> for header cells."
+    metric: table
+  handwriting:
+    prompt: "Transcribe the handwritten text in this image exactly. Output plain text only."
+    metric: cer
+    arabic: true
+
+grading:
+  arabic_norm:               # decide once, before the pilot; see wsp/grading.py DEFAULT_NORM
+    remove_diacritics: true
+    ta_marbuta: false
+    digits: western
+  loop: {tail_words: 200, ngram: 6, dup_threshold: 0.5}
+
+practice:
+  dir: data/public           # <task>.jsonl + images; PUBLIC data only
+  dev_fraction: 0.5
+
+budget:
+  passes: 25                 # the main independent variable: 0 / 10 / 25 / 50
+  python_runs: 300
+  max_turns: 400
+  max_failed_requests: 40
+  must_use_all_passes: true
+  explain_every_step: true
+
+limits:
+  gen_max_items: 256
+  gen_both_max_items: 128
+  tf_max_items: 256
+  tf_max_tokens_total: 400000
+  kernel_timeout_s: 900
+
+editing:
+  allow_vision: true         # scope ablation: set false for "language model + connector only"
+  allow_connector: true
+  frozen_patterns: []
+  refuse_rescale: true
+
+kernel:
+  sandbox_cmd: []            # e.g. bubblewrap, see README "Sandboxing the kernel"
+
+agent:
+  backend: anthropic         # anthropic | openai_compat | scripted
+  model: claude-opus-5-5
+  max_tokens: 32000
+  extra: {}                  # passed to the API call as-is: put the reasoning/effort setting for your model here
+  handoff_every_turns: 40
