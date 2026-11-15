@@ -1,0 +1,15 @@
+# The study: experiments x conditions x seeds. scripts/agent/make_runs.py turns this into one config per run,
+# plus agent_runs.sh (agent machine) and eval_runs.sh (evaluation machine).
+experiments: [ocr, arabic, table, handwriting, all]   # configs/experiments/<name>.yaml
+seeds: [1, 2, 3]                                       # also fixes each run's DEV/HOLDOUT split
+conditions:
+  - {name: claude_b0,  kind: agent, passes: 0}
+  - {name: claude_b25, kind: agent, passes: 25}
+  - {name: claude_b50, kind: agent, passes: 50}
+  - {name: diffmeans_b25, kind: diffmeans, passes: 25}
+  - {name: random_b25,    kind: random,    passes: 25}
+  # - {name: astra_b25, kind: agent, passes: 25, set: {agent: {backend: openai_compat, model: <name>, base_url: <url>}}}
+  # - {name: claude_b25_lm_only, kind: agent, passes: 25, set: {editing: {allow_vision: false}}}
+runs_root: runs
+bundles_root: bundles
+configs_out: configs/generated

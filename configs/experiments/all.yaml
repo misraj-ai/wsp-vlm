@@ -1,0 +1,3 @@
+# Experiment: all four tasks at once (practice data and feedback for every task).
+base: ../base.yaml
+experiment: {name: all, tasks: [ocr, arabic, table, handwriting]}

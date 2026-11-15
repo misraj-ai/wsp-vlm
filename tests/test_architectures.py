@@ -55,7 +55,7 @@ def test_discovery(mt, cls):
 
 @pytest.mark.skipif(importlib.util.find_spec("torchvision") is None, reason="Qwen processors need torchvision")
 def test_qwen35_generate_and_capture(tmp_path, toy):
-    subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "make_toy.py"), "--out", str(tmp_path), "--arch", "qwen35"],
+    subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "agent", "make_toy.py"), "--out", str(tmp_path), "--arch", "qwen35"],
                    check=True, capture_output=True)
     m, p = model_io.load_model({"path": str(tmp_path / "model"), "dtype": "float32", "device": "cpu"})
     d = model_io.discover(m)

@@ -5,6 +5,7 @@ last forward pass; the edit as it stands then is the submission (RUN/submission/
 
 Layout of a run directory:
   meta/         config.json, model.json (discovery), practice.json (items + fixed splits), prompt.txt
+                (read-only inside the kernel's sandbox)
   weights/      the base weights under model parameter names (what the kernel reads)
   work/         the agent's folder: edit/, notes.md, gen_<k>_<model>.jsonl, fwd_<k>/
   turns/tNNN/   prompt.txt (what the agent received), answer.md (its reply), meta.json (usage, timing)
@@ -57,8 +58,10 @@ class Run:
         self.work = os.path.join(self.dir, "work")
         self.model, self.processor = model_io.load_model(cfg["model"])
         self.disc = model_io.discover(self.model, cfg["model"].get("discovery"))
-        tasks = list(cfg["tasks"])
+        tasks = list(cfg["experiment"]["tasks"])
         self.items = load_dir(cfg["practice"]["dir"], tasks, cfg["practice"].get("max_items_per_task"))
+        for r in self.items:
+            r["image"] = os.path.realpath(r["image"])
         sp = os.path.join(self.dir, "meta", "splits.json")
         if os.path.exists(sp):
             self.split_of = json.load(open(sp))
@@ -82,7 +85,7 @@ class Run:
                  "reference": r["reference"]} for r in self.items])
         self.store = store_for(os.path.join(self.work, "edit"), os.path.join(self.dir, "weights"), self.disc, cfg)
         self.server = ForwardServer(cfg, self.model, self.processor, self.disc, self.items, self.split_of, self.store, self.work)
-        self.kernel = Kernel(self.dir, cfg["kernel"].get("python"), cfg["kernel"].get("sandbox_cmd"))
+        self.kernel = Kernel(self.dir, cfg["kernel"], sorted({os.path.dirname(r["image"]) for r in self.items}))
         self.agent = agents_mod.make(cfg["agent"]) if with_agent else None
         self.state_path = os.path.join(self.dir, "state.json")
         self.conv_path = os.path.join(self.dir, "conversation.json")
@@ -95,17 +98,39 @@ class Run:
     def task_prompt(self) -> str:
         c, b, lim = self.cfg, self.cfg["budget"], self.cfg["limits"]
         tpl = open(c["agent"].get("prompt_template") or os.path.join(PROMPTS, "task_v1.md"), encoding="utf-8").read()
-        tasks = "\n".join(f"- {n}: prompt {json.dumps(t['prompt'], ensure_ascii=False)}; metric: "
-                          + ("table (header and body cells)" if t["metric"] == "table" else "character error rate")
-                          + ("; Arabic" if t.get("arabic") else "") for n, t in c["tasks"].items())
+        ex = c["experiment"]["tasks"]
+        tasks = "\n".join(f"- {n} ({c['tasks'][n]['description']}): prompt {json.dumps(c['tasks'][n]['prompt'], ensure_ascii=False)}; "
+                          "metric: " + ("table (header and body cells)" if c["tasks"][n]["metric"] == "table" else "character error rate")
+                          + ("; Arabic" if c["tasks"][n].get("arabic") else "") for n in ex)
+        if len(ex) == 1:
+            goal = (f"Make the vision-language model described below better at {c['tasks'][ex[0]]['description']} (the task "
+                    f"'{ex[0]}').")
+            evaluated = ("Your edit is then evaluated on a PRIVATE test set of this task that you will never see. It comes from "
+                         "the same kind of documents as your practice data, and it is scored exactly as your practice answers "
+                         "are scored. The model is also tested on its other document tasks, which should not get worse.")
+        else:
+            goal = ("Make the vision-language model described below better at reading documents: "
+                    + "; ".join(c["tasks"][n]["description"] for n in ex) + ".")
+            evaluated = ("Your edit is then evaluated on PRIVATE test sets, one per task, that you will never see. They come "
+                         "from the same kinds of documents as your practice data, and they are scored exactly as your practice "
+                         "answers are scored. The goal is a model that is better overall: improve the tasks you can without "
+                         "making the others worse.")
         norm = dict(DEFAULT_NORM, **(c["grading"].get("arabic_norm") or {}))
-        grading = ("- Text tasks: score = 1 - CER (character error rate, clipped at 0) after normalizing both the output and the "
-                   f"reference ({', '.join(k + '=' + str(v) for k, v in norm.items())}). Reasoning between <think> tags and a single "
-                   "code fence around the answer are removed first.\n"
-                   "- Table tasks: the first table in the output (HTML or markdown) is parsed. Header = the leading rows of <th> cells "
-                   "(or the first row if none, or the row above |---| in markdown). score = 0.5 * header-cell F1 + 0.5 * body-cell F1 "
-                   "over normalized cell texts. No table in the output scores 0.\n"
-                   "- Also reported, not scored: loops (a repeating tail), outputs cut at the token limit, empty outputs, Latin share in Arabic tasks.")
+        metrics = {c["tasks"][n]["metric"] for n in ex}
+        g = []
+        if "cer" in metrics:
+            g.append("- Text tasks: score = 1 - CER (character error rate, clipped at 0) after normalizing both the output and "
+                     f"the reference ({', '.join(k + '=' + str(v) for k, v in norm.items())}). Reasoning between <think> tags "
+                     "and a single code fence around the answer are removed first.")
+        if "table" in metrics:
+            g.append("- Table tasks: the first table in the output (HTML or markdown) is parsed. Header = the leading rows of <th> "
+                     "cells (or the first row if none, or the row above |---| in markdown). score = 0.5 * header-cell F1 + "
+                     "0.5 * body-cell F1 over cell texts normalized "
+                     + ("as for text tasks" if "cer" in metrics else "(" + ", ".join(k + "=" + str(v) for k, v in norm.items()) + ")")
+                     + ". No table in the output scores 0.")
+        g.append("- Also reported, not scored: loops (a repeating tail), outputs cut at the token limit, empty outputs"
+                 + (", Latin share in Arabic tasks." if any(c["tasks"][n].get("arabic") for n in ex) else "."))
+        grading = "\n".join(g)
         p = c["protocol"]
         proto = (f"chat template of the model, the image then the task prompt in one user message"
                  + (f", system prompt {json.dumps(p['system_prompt'], ensure_ascii=False)}" if p.get("system_prompt") else "")
@@ -123,7 +148,8 @@ class Run:
                                                                 ("no connector edits", e.get("allow_connector", True))) if not ok) + ")"
         explain = ("Begin every reply by explaining in plain words what you will do and why (a block without an explanation is "
                    "sent back unrun). " if b.get("explain_every_step", True) else "")
-        rep = {"MODEL_DESCRIPTION": model_io.describe(self.disc, self.model), "TASKS": tasks, "GRADING": grading,
+        rep = {"GOAL": goal, "EVALUATED": evaluated,
+               "MODEL_DESCRIPTION": model_io.describe(self.disc, self.model), "TASKS": tasks, "GRADING": grading,
                "PROTOCOL": proto, "PYTHON_RUNS": b["python_runs"], "KERNEL_TIMEOUT": lim["kernel_timeout_s"],
                "PRACTICE_STATS": stats, "PASSES": b["passes"], "GEN_MAX": lim["gen_max_items"],
                "GEN_BOTH_MAX": lim["gen_both_max_items"], "TF_MAX": lim["tf_max_items"], "TF_TOKENS": lim["tf_max_tokens_total"],

@@ -46,33 +46,55 @@ Choose a ~1B VLM that:
 Discovery and capture were tested on tiny versions of Qwen3.5, Qwen3-VL, LightOnOCR, PaddleOCR-VL,
 SmolVLM, LFM2-VL, InternVL and Idefics3 (`tests/test_architectures.py`).
 
-## Data
+## Data (two machines)
 
-| Set | Use | Size per task (suggested) | Rule |
+| Set | Where it lives | Use | Size per task (suggested) |
 |---|---|---|---|
-| Public practice | agent feedback (DEV) and confirmation (HOLDOUT), fixed 50/50 split per seed | 500–2,000 | never overlaps the private set (`scripts/check_overlap.py`) |
-| Private test | the only reported numbers | ≥ 300 (≥ 500 for tables) | never on the agent machine; evaluated once per submission |
-| General regression | side effects (RQ6) | 200–500 | e.g. English OCR, a VQA set, a text-only set |
+| Public practice | agent machine | agent feedback (DEV) and confirmation (HOLDOUT), a fixed 50/50 split per seed | 500–2,000 |
+| Private test | evaluation machine only, folder marked with a `PRIVATE` file | the only reported numbers | ≥ 300 (≥ 500 for tables) |
+| General regression | evaluation machine | side effects (RQ6): e.g. English OCR, a VQA set, a text-only set | 200–500 |
+
+The agent machine never holds private data, private outputs or per-item private results. The evaluation machine
+receives only bundles: the edit plus a frozen evaluation spec. Only aggregate reports leave it. The overlap check
+runs on the evaluation machine with a copy of the public set; flagged public items are removed on the agent machine.
 
 Fix the Arabic normalization and the table prompt (HTML with `<th>`) before the pilot. Both change the scores.
 
-## Conditions
+## Experiments and conditions
 
-Every condition uses the same model, protocol, practice data, split seed and private evaluation.
+Each task is its own experiment, and one more experiment covers all four:
+
+| Experiment | The agent works on (practice data + feedback) | Question it answers |
+|---|---|---|
+| E-OCR | printed OCR | can it fix plain transcription errors / loops? |
+| E-AR | Arabic documents | script drift, Arabic-specific misreadings |
+| E-TAB | tables | the header problem (RQ3): structure vs text |
+| E-HW | handwriting | the hardest capability limit; expected null |
+| E-ALL | all four at once | does one edit improve the model overall (RQ6), and does it beat the best single-task edit on its own task? |
+
+Every experiment's submissions are evaluated on **all four** private test sets. The other three tasks measure the
+side effects of a single-task edit.
+
+Conditions, run inside every experiment with the same model, protocol, practice data and seeds (seed = the DEV/HOLDOUT split):
 
 | ID | Editor | Passes | Edit scope | Seeds | Why |
 |---|---|---|---|---|---|
-| A0 | none (unedited, best decoding setting) | – | – | – | the baseline every edit must beat |
-| A1 | Claude agent | 0 / 10 / 25 / 50 | all | 3 each | budget curve; 0 passes = weights + practice data only |
-| A2 | second agent (Astra or another, `openai_compat`) | 25 (and 50 if affordable) | all | 3 | is it the agent or the method? |
-| B1 | diffmeans script | 10 / 25 / 50 | LM writers | 3 | automated version of the paper's edit |
+| A0 | none (unedited, best decoding setting) | – | – | – | the baseline every edit must beat (one bundle, shared by all experiments) |
+| A1 | Claude agent | 0 / 25 / 50 | all | 3 each | budget curve; 0 passes = weights + practice data only |
+| A2 | second agent (Astra or another, `openai_compat`) | 25 | all | 3 | is it the agent or the method? |
+| B1 | diffmeans script | 25 | LM writers | 3 | automated version of the paper's edit |
 | B2 | random direction (matched) | 25 | LM writers | 3 | does the direction carry information? |
 | B3 | diffmeans script, `--where vision` | 25 | vision writers | 3 | can the vision tower be steered the same way? |
-| C1 | Claude agent | 25 | LM + connector only | 2 | scope ablation |
-| C2 | Claude agent | 25 | vision + connector only (freeze the LM with `frozen_patterns`) | 2 | scope ablation |
-| D1 | Claude agent, table-only practice | 25 | all | 2 | a focused attempt at the header problem; check the other tasks for regressions |
+| C1 | Claude agent | 25 | LM + connector only (`allow_vision: false`) | 2 | scope ablation |
+| C2 | Claude agent | 25 | vision + connector only (LM frozen via `frozen_patterns`) | 2 | scope ablation |
 
-Minimum viable study: A0, A1 at 0/25/50 (3 seeds), B1 and B2 at 25 (3 seeds). That is 15 runs.
+[configs/matrix.example.yaml](configs/matrix.example.yaml) generates this as one config per run. The default matrix
+is 5 experiments × 5 conditions (A1 at 0/25/50, B1, B2) × 3 seeds = 75 runs, plus A0.
+
+**If compute is tight**, in this order:
+1. E-TAB and E-ALL with A1 (0, 25), B1 and B2, 3 seeds each. That is 24 runs and answers RQ1, RQ3, RQ4 and RQ6.
+2. Then the other single-task experiments.
+3. Then A2 and the scope ablations.
 
 ## Metrics
 
@@ -88,28 +110,34 @@ Minimum viable study: A0, A1 at 0/25/50 (3 seeds), B1 and B2 at 25 (3 seeds). Th
 
 ## Statistics
 
-- Paired per-item differences with bootstrap CIs (`scripts/compare.py`); Holm correction across the 4 tasks.
+- Paired per-item differences with bootstrap CIs (`scripts/eval/compare.py`); Holm correction across the 4 tasks, per experiment.
 - Report each condition as mean ± SD across seeds, plus every individual run. The paper had one run per budget.
 - A gain counts only if it exceeds 2 SE on the private set and no task drops significantly.
 - Agent vs script: compare the per-seed private gains (3 vs 3); report all values, not only means.
 
 ## Procedure
 
-1. **Setup.** Install, run `pytest tests`, prepare `data/public` and the private set in the JSONL format (README),
-   run `scripts/check_overlap.py` and remove flagged public items.
-2. **Pilot** (no budget) on 2–3 candidate models: `scripts/pilot.py --check-batching 32`. Read
-   `pilot_report.json`: switch-like error share per task, the header analysis, loop rates. Pick the model and
+1. **Setup.**
+   - Install on both machines and run `pytest tests` (27 tests).
+   - Install bubblewrap on the agent machine.
+   - Prepare `data/public` (agent machine) and the private set (evaluation machine, `touch PRIVATE`) in the JSONL format.
+   - On the evaluation machine, run `scripts/eval/check_overlap.py` against a copy of the public set, then remove flagged public items.
+2. **Pilot** on the agent machine, no budget, on 2–3 candidate models:
+   `scripts/agent/pilot.py --config configs/experiments/all.yaml --check-batching 32`.
+   Read `pilot_report.json`: the switch-like error share per task, the header analysis, loop rates. Pick the model and
    write down the predictions above with numbers.
-3. **Protocol.** `scripts/decode_sweep.py` over decoding, image size and prompt variants on DEV. Freeze the best into
-   the config. Evaluate A0 on the private set once.
-4. **Baselines.** B1, B2 and B3 runs; evaluate each submission on the private set.
-5. **Agent runs.** A1, then A2/C/D. One fresh run directory per run; never reuse a run's work folder.
-   Resume after crashes with the same command.
-6. **Evaluation.** `scripts/evaluate_private.py` per submission, then `scripts/compare.py` against A0.
+3. **Protocol.** Run `scripts/agent/decode_sweep.py` over decoding, image size and prompt variants on DEV. Freeze the
+   best into `configs/base.yaml`, pin the model revision, and export the A0 bundle.
+4. **Runs.** `make_runs.py`, then `agent_runs.sh`: baselines and agent runs for every experiment, one fresh run
+   directory each. Re-running a command resumes after a crash.
+5. **Transfer.** Copy `bundles/` to the evaluation machine.
+6. **Evaluation.** On the evaluation machine, `eval_runs.sh`: every bundle on all four private sets, then one
+   `compare.py` report per experiment.
 7. **Analysis.**
    - Read each run's edit manifest: which tensors, how large (`rel_change_fro`).
    - Read the agent's explanations: what did it diagnose?
    - Test RQ3 on the tables whose header changed.
+   - Build the cross-task matrix: each single-task experiment's effect on all four tasks.
    - Run the regression suite on the best submissions.
 
 ## Compute (rough)
@@ -118,7 +146,7 @@ Minimum viable study: A0, A1 at 0/25/50 (3 seeds), B1 and B2 at 25 (3 seeds). Th
 - A 50-pass agent run with 256-item passes and ~800-token outputs generates ~10M tokens. That is about 1–2
   GPU-hours on a 1B model with HF `generate` at batch 16, plus teacher-forced passes and the agent's API cost.
 - The paper's 50-pass run used ~145M tokens because of 30k-token reasoning traces. OCR outputs are far shorter.
-- Fifteen runs fit in a few GPU-days. The agent API cost depends on the model and on turn counts (100–200 turns per 50-pass run in the paper).
+- The 24-run priority set fits in a few GPU-days; the full 75-run matrix takes roughly 2–3 GPU-weeks on one GPU. The agent API cost depends on the model and on turn counts (100–200 turns per 50-pass run in the paper).
 
 ## Risks and how the design handles them
 
@@ -127,7 +155,8 @@ Minimum viable study: A0, A1 at 0/25/50 (3 seeds), B1 and B2 at 25 (3 seeds). Th
 | Baseline set badly, so the "gain" is a decoding fix | decode sweep first; A0 = best decoding setting |
 | The agent tunes to the grader's quirks (normalization, markup) | the same grader everywhere, fixed before the runs; inspect outputs of the best runs for format tricks |
 | Selection on DEV noise | fixed DEV/HOLDOUT split; the agent is told to confirm on HOLDOUT; only private numbers are reported |
-| Leakage between public and private | overlap check; the private set never on the agent machine |
+| Leakage between public and private | overlap check; the private set only on the evaluation machine (PRIVATE marker, refused by every agent-side loader); bundles carry no data |
+| The agent's code reads files it should not | bubblewrap sandbox: only its folder, the weights and the practice images exist inside it; no network; empty environment |
 | One lucky run | 3 seeds per condition; report every run |
 | Outputs depend on batch composition | `pilot.py --check-batching`; set `batch_size: 1` if they differ |
 | The agent trains covertly | static policy + runtime blocks in the kernel + every run logged in `tool_calls.jsonl` for audit |

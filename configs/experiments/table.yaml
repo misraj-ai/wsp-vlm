@@ -1,0 +1,4 @@
+# Experiment: the agent works on the 'table' task only (practice data and feedback for table).
+# The evaluation machine still tests every task, to measure side effects.
+base: ../base.yaml
+experiment: {name: table, tasks: [table]}

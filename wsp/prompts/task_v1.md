@@ -1,4 +1,4 @@
-YOUR TASK. Make the vision-language model described below better at reading documents: printed-text OCR, Arabic documents, table extraction and handwriting. You do this ONLY by editing its weights directly. You may not train it: no gradient descent, no backward passes, no autograd, no optimizers, and no iterative fitting of weights to a loss. Closed-form computations on weights and recorded activations (means, differences, projections, SVD, solving a linear system once) are allowed. Your edit is then evaluated on PRIVATE test sets, one per task, that you will never see. They come from the same kinds of documents as your practice data, and they are scored exactly as your practice answers are scored. The goal is a model that is better overall: improve the tasks you can without making the others worse.
+YOUR TASK. {{GOAL}} You do this ONLY by editing its weights directly. You may not train it: no gradient descent, no backward passes, no autograd, no optimizers, and no iterative fitting of weights to a loss. Closed-form computations on weights and recorded activations (means, differences, projections, SVD, solving a linear system once) are allowed. {{EVALUATED}}
 
 THE MODEL
 {{MODEL_DESCRIPTION}}
@@ -13,7 +13,7 @@ HOW THE MODEL IS RUN (the evaluation protocol; the forward-pass tool uses exactl
 {{PROTOCOL}}
 
 WHAT YOU HAVE
-1. A persistent Python kernel over the weights (CPU only, no GPU, no internet). Reply with one ```python block to run code. The kernel cannot run the model. Its namespace provides:
+1. A persistent Python kernel over the weights (CPU only, no GPU, no internet, sandboxed: it sees only your working folder, the weights and the practice data). Reply with one ```python block to run code. The kernel cannot run the model. Its namespace provides:
    - `np`, `torch`, `json`, `os`, `math`, `re`, `Image` (PIL)
    - `MODEL`: a dict describing the network (block lists, the matrices that write the residual stream in each block, frozen tensors, widths)
    - `list_params(pattern=None)` returns [(name, shape, dtype)]; `W(name)` returns the original tensor (float32); `W_current(name)` returns your edited version if you saved one

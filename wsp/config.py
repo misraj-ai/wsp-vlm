@@ -9,8 +9,12 @@ import yaml
 
 DEFAULTS = {
     "run_name": "run",
+    "condition": None,                # e.g. claude_b25, diffmeans_b25 (set by scripts/agent/make_runs.py)
     "run_dir": "runs/run",
     "seed": 0,
+    # Which tasks this experiment is about. The agent gets practice data and feedback for these tasks only;
+    # the evaluation machine can still test every task in `tasks` (side effects). None = all tasks ("all").
+    "experiment": {"name": None, "tasks": None},
     "weights_cache": None,            # e.g. cache/<model>-<revision>: exported base weights shared by all runs
     "model": {
         "path": None,                 # HF hub id or local directory
@@ -23,7 +27,7 @@ DEFAULTS = {
         "chat_template_kwargs": {},   # passed to apply_chat_template (e.g. {"enable_thinking": false})
         "discovery": {},              # regex overrides: lm_layers, vision_layers, connector, writer, attn_out
     },
-    # The evaluation protocol. Fix it (scripts/decode_sweep.py) BEFORE any agent run; it is the same for
+    # The evaluation protocol. Fix it (scripts/agent/decode_sweep.py) BEFORE any agent run; it is the same for
     # practice feedback, baselines and the private evaluation.
     "protocol": {
         "max_new_tokens": 2048,
@@ -38,7 +42,7 @@ DEFAULTS = {
         "seed": 0,
         "system_prompt": None,
     },
-    "tasks": {},                      # name -> {prompt, metric: cer|table, arabic: bool}
+    "tasks": {},                      # name -> {prompt, metric: cer|table, arabic: bool, description}
     "grading": {"arabic_norm": {}, "loop": {}},
     "practice": {
         "dir": None,                  # directory holding <task>.jsonl (public data only)
@@ -73,8 +77,12 @@ DEFAULTS = {
         "warn": [r"lstsq", r"pinv", r"linalg\.solve"],
     },
     "kernel": {
+        "sandbox": "bwrap",           # bwrap (default; required for real runs) | none (tests only)
+        "allow_unsandboxed": False,   # must be true to run with sandbox: none
+        "mem_gb": 96,                 # address-space cap for the kernel process
+        "threads": 8,
+        "extra_ro_binds": [],         # extra read-only paths the kernel needs (e.g. a Python env outside /usr)
         "python": None,               # interpreter for the kernel (default: this one)
-        "sandbox_cmd": [],            # e.g. ["bwrap", "--unshare-net", ...] (see README)
     },
     "agent": {
         "backend": "anthropic",       # anthropic | openai_compat | scripted
@@ -98,10 +106,19 @@ def _merge(a: dict, b: dict) -> dict:
     return out
 
 
-def load(path: str, overrides: dict | None = None) -> dict:
+def _read(path: str) -> dict:
+    """Read a YAML config, following `base:` (a path relative to this file) recursively."""
     with open(path) as f:
         user = yaml.safe_load(f) or {}
-    cfg = _merge(DEFAULTS, user)
+    base = user.pop("base", None)
+    if base:
+        bp = base if os.path.isabs(base) else os.path.join(os.path.dirname(os.path.abspath(path)), base)
+        return _merge(_read(bp), user)
+    return user
+
+
+def load(path: str, overrides: dict | None = None) -> dict:
+    cfg = _merge(DEFAULTS, _read(path))
     if overrides:
         cfg = _merge(cfg, overrides)
     # relative paths are resolved against the current working directory
@@ -110,8 +127,17 @@ def load(path: str, overrides: dict | None = None) -> dict:
     for name, t in cfg["tasks"].items():
         t.setdefault("metric", "cer")
         t.setdefault("arabic", False)
+        t.setdefault("description", name)
         if "prompt" not in t:
             raise ValueError(f"config: task {name} needs a prompt")
+    ex = cfg["experiment"]
+    if not ex.get("tasks"):
+        ex["tasks"] = list(cfg["tasks"])
+    unknown = [t for t in ex["tasks"] if t not in cfg["tasks"]]
+    if unknown:
+        raise ValueError(f"config: experiment.tasks has undefined tasks {unknown}")
+    if not ex.get("name"):
+        ex["name"] = ex["tasks"][0] if len(ex["tasks"]) == 1 else "all"
     return cfg
 
 

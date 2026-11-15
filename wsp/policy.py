@@ -1,7 +1,7 @@
 """Static checks on the agent's kernel code. This is the first line of the no-training rule; the
 kernel also disables autograd and optimizers at runtime, and every run is logged for audit.
-The goal is fair play, not a security boundary: run the kernel under bubblewrap or a container
-(kernel.sandbox_cmd) to cut network and file access for real."""
+The goal is fair play, not a security boundary: the security boundary is the bubblewrap sandbox the
+kernel runs in (wsp/sandbox.py), which cuts network and file access for real."""
 from __future__ import annotations
 
 import io

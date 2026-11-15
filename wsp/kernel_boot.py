@@ -29,7 +29,9 @@ import traceback
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--pkg", required=True)
-ap.add_argument("--run", required=True)
+ap.add_argument("--meta", required=True)
+ap.add_argument("--work", required=True)
+ap.add_argument("--weights", required=True)
 ap.add_argument("--reply-fd", type=int, required=True)
 args = ap.parse_args()
 
@@ -63,17 +65,15 @@ for _n in dir(_optim):
         setattr(_optim, _n, _forbidden)
 _Opt.__init__ = _forbidden
 
-RUN = args.run
-META = os.path.join(RUN, "meta")
-WORK = os.path.join(RUN, "work")
+META, WORK, WEIGHTS = args.meta, args.work, args.weights
 with open(os.path.join(META, "model.json")) as f:
     MODEL = json.load(f)
 with open(os.path.join(META, "config.json")) as f:
     _CFG = json.load(f)
 with open(os.path.join(META, "practice.json"), encoding="utf-8") as f:
     _PRACTICE = json.load(f)
-_W = WeightsReader(os.path.join(RUN, "weights"))
-_STORE = store_for(os.path.join(WORK, "edit"), os.path.join(RUN, "weights"), MODEL, _CFG)
+_W = WeightsReader(WEIGHTS)
+_STORE = store_for(os.path.join(WORK, "edit"), WEIGHTS, MODEL, _CFG)
 _BY_ID = {r["id"]: r for r in _PRACTICE}
 
 

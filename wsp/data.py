@@ -15,6 +15,26 @@ import random
 
 from PIL import Image
 
+PRIVATE_MARKER = "PRIVATE"   # an empty file of this name marks a private test set (in its folder or any parent)
+
+
+class PrivateDataError(RuntimeError):
+    pass
+
+
+def private_root(path: str) -> str | None:
+    """The folder holding a PRIVATE marker at or above `path`, if any."""
+    d = os.path.realpath(path)
+    if not os.path.isdir(d):
+        d = os.path.dirname(d)
+    while True:
+        if os.path.exists(os.path.join(d, PRIVATE_MARKER)):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
 
 def load_task_file(path: str, task: str) -> list[dict]:
     base = os.path.dirname(os.path.abspath(path))
@@ -37,7 +57,12 @@ def load_task_file(path: str, task: str) -> list[dict]:
     return items
 
 
-def load_dir(d: str, tasks: list[str], max_per_task: int | None = None) -> list[dict]:
+def load_dir(d: str, tasks: list[str], max_per_task: int | None = None, allow_private: bool = False) -> list[dict]:
+    """Load task files. On the agent machine (allow_private=False) any data under a PRIVATE marker is
+    refused, including images that point into such a folder. Only the evaluation scripts pass True."""
+    if not allow_private and private_root(d):
+        raise PrivateDataError(f"{d} is marked private ({private_root(d)}/{PRIVATE_MARKER}): private test sets are only "
+                               "read by the evaluation machine's scripts")
     out = []
     for t in tasks:
         p = os.path.join(d, f"{t}.jsonl")
@@ -45,6 +70,14 @@ def load_dir(d: str, tasks: list[str], max_per_task: int | None = None) -> list[
             raise FileNotFoundError(f"no data file for task '{t}': {p}")
         rows = load_task_file(p, t)
         out += rows[:max_per_task] if max_per_task else rows
+    if not allow_private:
+        seen = {}
+        for r in out:
+            pd = os.path.dirname(r["image"])
+            if pd not in seen:
+                seen[pd] = private_root(pd)
+            if seen[pd]:
+                raise PrivateDataError(f"item {r['id']}: its image is under a private folder ({seen[pd]})")
     ids = [r["id"] for r in out]
     if len(ids) != len(set(ids)):
         raise ValueError("item ids must be unique across tasks (prefix them with the task name)")

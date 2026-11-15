@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 
 import pytest
 import torch
@@ -86,7 +87,7 @@ def test_policy():
     assert check("torch.linalg.lstsq(A, B)", warn=[r"lstsq"])[1]
 
 
-def test_kernel_blocks_gradients_and_persists(setup, tmp_path):
+def _kernel_run_dir(setup, tmp_path):
     cfg, model, disc, store, tmp = setup
     run = tmp_path / "krun"
     for d in ("meta", "work"):
@@ -94,8 +95,20 @@ def test_kernel_blocks_gradients_and_persists(setup, tmp_path):
     os.symlink(tmp / "weights", run / "weights")
     json.dump(disc, open(run / "meta" / "model.json", "w"))
     json.dump(cfg, open(run / "meta" / "config.json", "w"), default=str)
-    json.dump([], open(run / "meta" / "practice.json", "w"))
-    k = Kernel(str(run))
+    pdir = tmp_path / "practice_images"
+    pdir.mkdir()
+    (pdir / "a.png").write_bytes(b"png")
+    json.dump([{"id": "x", "task": "ocr", "split": "dev", "image": str(pdir / "a.png"), "reference": "r"}],
+              open(run / "meta" / "practice.json", "w"))
+    return run, pdir
+
+
+KCFG = {"sandbox": "bwrap"} if shutil.which("bwrap") else {"sandbox": "none", "allow_unsandboxed": True}
+
+
+def test_kernel_blocks_gradients_and_persists(setup, tmp_path):
+    run, pdir = _kernel_run_dir(setup, tmp_path)
+    k = Kernel(str(run), KCFG, [str(pdir)])
     try:
         assert "3" in k.run("x = 1 + 2\nprint(x)", 60)["output"]
         assert "3" in k.run("print(x)", 60)["output"]                     # state persists between runs
@@ -104,7 +117,44 @@ def test_kernel_blocks_gradients_and_persists(setup, tmp_path):
         out = k.run("import torch.optim as o\no.SGD([torch.zeros(1)], lr=1)", 60)["output"]
         assert "not allowed" in out
         assert "False" in k.run("print(torch.cuda.is_available())", 60)["output"]
+        out = k.run("print(len(list_params()), practice()[0]['id'], os.path.exists(practice()[0]['image']))", 60)["output"]
+        assert "x True" in out
         assert "TIMEOUT" in k.run("import time\ntime.sleep(5)", 1)["output"]   # restarted
         assert "NameError" in k.run("print(x)", 60)["output"]                  # variables lost after restart
     finally:
         k.stop()
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap not installed")
+def test_sandbox_isolation(setup, tmp_path, private_copy):
+    run, pdir = _kernel_run_dir(setup, tmp_path)
+    secret = tmp_path / "api_config.txt"
+    secret.write_text("sk-secret")
+    os.environ["ANTHROPIC_API_KEY"] = "sk-test-not-real"
+    k = Kernel(str(run), {"sandbox": "bwrap"}, [str(pdir)])
+    try:
+        code = (f"import socket\n"
+                f"print('secret', os.path.exists({str(secret)!r}))\n"
+                f"print('private', os.path.exists({str(private_copy)!r}))\n"
+                f"print('home', os.path.exists('/root'), os.path.exists({os.path.expanduser('~')!r}))\n"
+                f"print('env', sorted(k for k in os.environ if 'KEY' in k or 'TOKEN' in k))\n"
+                "try:\n    socket.create_connection(('1.1.1.1', 80), timeout=3); print('net open')\n"
+                "except OSError as e:\n    print('net blocked')\n"
+                "try:\n    open('/run/meta/x', 'w'); print('meta writable')\n"
+                "except OSError:\n    print('meta read-only')\n"
+                "open(WORK + '/f.txt', 'w').write('ok'); print('work writable')\n"
+                f"print('practice', os.path.exists({str(pdir / 'a.png')!r}))")
+        out = k.run(code, 120)["output"]       # (the driver's static policy would refuse 'import socket'; the kernel is tested directly)
+        for want in ("secret False", "private False", "home False False", "env []", "net blocked", "meta read-only",
+                     "work writable", "practice True"):
+            assert want in out, (want, out)
+        assert (run / "work" / "f.txt").read_text() == "ok"
+    finally:
+        k.stop()
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_kernel_refuses_to_run_unsandboxed_by_default(tmp_path):
+    from wsp.kernel import SandboxError
+    with pytest.raises(SandboxError, match="allow_unsandboxed"):
+        Kernel(str(tmp_path), {"sandbox": "none"})

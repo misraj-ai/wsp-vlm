@@ -1,4 +1,4 @@
-# Decoding-only settings to compare BEFORE any agent run (scripts/decode_sweep.py). Edit for your model.
+# Decoding-only settings to compare BEFORE any agent run (scripts/agent/decode_sweep.py). Edit for your model.
 - name: greedy_default
   protocol: {}
 - name: greedy_rep1.1
