@@ -25,7 +25,7 @@ from wsp.forward import summarize
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--config", required=True)
-ap.add_argument("--grid", required=True, help="YAML list of {name, protocol: {...}, tasks: {task: {prompt}}} overrides")
+ap.add_argument("--grid", required=True, help="YAML list of {name, protocol: {...}, tasks: {task: {prompt}}, processor_kwargs: {...}} overrides")
 ap.add_argument("--n", type=int, default=100, help="DEV items per task")
 ap.add_argument("--out", required=True)
 ap.add_argument("--set", action="append", default=[])
@@ -46,8 +46,12 @@ for g in grid:
     c["protocol"].update(g.get("protocol", {}))
     for t, tv in (g.get("tasks") or {}).items():
         c["tasks"][t].update(tv)
+    p = proc
+    if "processor_kwargs" in g:   # e.g. SmolVLM resolution / image splitting: reload only the processor
+        c["model"]["processor_kwargs"] = g["processor_kwargs"]
+        p = model_io.load_processor(c["model"])
     print(f"== {g['name']}")
-    rows = run_items(model, proc, c, dev)
+    rows = run_items(model, p, c, dev)
     s = summarize(rows, c["tasks"])
     table.append({"name": g["name"], "overrides": g, "score": s["score"],
                   "by_task": {t: v["score"] for t, v in s["by_task"].items()},
@@ -58,4 +62,4 @@ print("\nsetting | task-mean score | " + " | ".join(TASKS) + " | loop | cut")
 for r in table:
     print(f"{r['name']} | {sum(r['by_task'].values()) / len(r['by_task']):.4f} | "
           + " | ".join(f"{r['by_task'].get(t, float('nan')):.4f}" for t in TASKS) + f" | {r['loop_rate']} | {r['cut_rate']}")
-print(f"\nbest: {table[0]['name']} -> copy its overrides into the run config")
+print(f"\nbest: {table[0]['name']} -> copy its overrides into the base config (protocol / tasks / model.processor_kwargs)")

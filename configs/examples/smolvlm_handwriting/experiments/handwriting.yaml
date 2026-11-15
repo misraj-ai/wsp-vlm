@@ -1,0 +1,3 @@
+# Experiment: the agent works on Arabic handwriting only (practice data and feedback for handwriting).
+base: ../base.yaml
+experiment: {name: handwriting, tasks: [handwriting]}

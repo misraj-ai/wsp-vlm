@@ -1,5 +1,6 @@
 torch>=2.4
 torchvision            # needed by Qwen-family image/video processors
+num2words              # needed by the SmolVLM processor
 transformers>=4.57     # tested with 5.22
 safetensors
 tokenizers

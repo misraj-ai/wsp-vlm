@@ -23,7 +23,7 @@ import tarfile
 import tempfile
 
 SPEC_KEYS_MODEL = ("path", "revision", "dtype", "trust_remote_code", "attn_implementation", "auto_class",
-                   "chat_template_kwargs", "discovery")
+                   "chat_template_kwargs", "processor_kwargs", "discovery")
 
 
 def code_hash() -> str:

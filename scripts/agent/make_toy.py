@@ -97,6 +97,51 @@ def build_qwen35(out):
     return d
 
 
+def build_smolvlm(out):
+    """Tiny SmolVLM (SigLIP-style vision tower -> pixel-shuffle connector -> Llama-style LM) with the real
+    SmolVLMProcessor, image splitting on. Needs num2words."""
+    import transformers as tf
+
+    rows = [f"<row_{r}_col_{c}>" for r in range(1, 9) for c in range(1, 9)]
+    specials = ["<unk>", "<|im_start|>", "<end_of_utterance>", "<|endoftext|>", "<fake_token_around_image>", "<image>",
+                "<global-img>", "<video>"] + rows
+    tok = Tokenizer(models.BPE(unk_token="<unk>"))
+    tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tok.decoder = decoders.ByteLevel()
+    tok.train_from_iterator(["User: Assistant: abc <table><tr><th>A</th></tr></table> " + AR + " 0123456789\n"] * 5,
+                            trainers.BpeTrainer(vocab_size=500, special_tokens=specials,
+                                                initial_alphabet=pre_tokenizers.ByteLevel.alphabet()))
+    ft = PreTrainedTokenizerFast(tokenizer_object=tok, unk_token="<unk>", bos_token="<|im_start|>",
+                                 eos_token="<end_of_utterance>", pad_token="<|endoftext|>")
+    tmpl = ("<|im_start|>{% for m in messages %}{{ m['role'] | capitalize }}:{% if m['content'] is string %} {{ m['content'] }}"
+            "{% else %}{% for c in m['content'] %}{% if c['type'] == 'image' %}<image>{% else %} {{ c['text'] }}{% endif %}"
+            "{% endfor %}{% endif %}<end_of_utterance>\n{% endfor %}{% if add_generation_prompt %}Assistant:{% endif %}")
+    ft.chat_template = tmpl
+    ip = tf.SmolVLMImageProcessor(do_image_splitting=True, size={"longest_edge": 64}, max_image_size={"longest_edge": 32})
+    from transformers.models.smolvlm.video_processing_smolvlm import SmolVLMVideoProcessor
+    vp = SmolVLMVideoProcessor()
+    proc = tf.SmolVLMProcessor(image_processor=ip, tokenizer=ft, video_processor=vp, image_seq_len=4, chat_template=tmpl)
+    cfg = tf.AutoConfig.for_model("smolvlm")
+    vc, tc = cfg.vision_config, cfg.text_config
+    for k, v in dict(hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=2, image_size=32,
+                     patch_size=8).items():
+        setattr(vc, k, v)
+    for k, v in dict(hidden_size=48, intermediate_size=96, num_hidden_layers=3, num_attention_heads=4, num_key_value_heads=2,
+                     vocab_size=len(ft), pad_token_id=ft.pad_token_id, eos_token_id=ft.eos_token_id,
+                     bos_token_id=ft.bos_token_id, tie_word_embeddings=False).items():
+        setattr(tc, k, v)
+    cfg.scale_factor = 2
+    cfg.image_token_id = ft.convert_tokens_to_ids("<image>")
+    cfg.pad_token_id, cfg.tie_word_embeddings = ft.pad_token_id, False
+    torch.manual_seed(0)
+    m = tf.SmolVLMForConditionalGeneration(cfg)
+    m.generation_config.eos_token_id, m.generation_config.pad_token_id = ft.eos_token_id, ft.pad_token_id
+    d = os.path.join(out, "model")
+    m.save_pretrained(d)
+    proc.save_pretrained(d)
+    return d
+
+
 def _img(path, text, table=None):
     im = Image.new("RGB", (160, 96), "white")
     dr = ImageDraw.Draw(im)
@@ -142,9 +187,9 @@ def build_data(out, n_public=24, n_private=16):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="toy")
-    ap.add_argument("--arch", choices=["llava", "qwen35"], default="llava")
+    ap.add_argument("--arch", choices=["llava", "qwen35", "smolvlm"], default="llava")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    print("model:", build_model(a.out) if a.arch == "llava" else build_qwen35(a.out))
+    print("model:", {"llava": build_model, "qwen35": build_qwen35, "smolvlm": build_smolvlm}[a.arch](a.out))
     build_data(a.out)
     print("data:", os.path.join(a.out, "data"))

@@ -1,0 +1,18 @@
+# Budget study for SmolVLM on Arabic handwriting:
+#   python scripts/agent/make_runs.py --matrix configs/examples/smolvlm_handwriting/matrix.yaml --private /secure/private_handwriting
+experiments: [handwriting]
+seeds: [1, 2, 3]
+conditions:
+  - {name: claude_b0,  kind: agent, passes: 0}      # weights + practice data only, no forward passes
+  - {name: claude_b10, kind: agent, passes: 10}
+  - {name: claude_b20, kind: agent, passes: 20}
+  - {name: claude_b50, kind: agent, passes: 50}
+  - {name: diffmeans_b20, kind: diffmeans, passes: 20}   # scripted baseline, same budget
+  - {name: random_b20,    kind: random,    passes: 20}   # matched random control
+  - {name: diffmeans_b50, kind: diffmeans, passes: 50}
+runs_root: runs/smolvlm_handwriting
+bundles_root: bundles/smolvlm_handwriting
+results_root: results/smolvlm_handwriting      # evaluation machine
+reports_root: reports/smolvlm_handwriting
+configs_out: configs/examples/smolvlm_handwriting/generated
+scripts_out: configs/examples/smolvlm_handwriting   # where agent_runs.sh / eval_runs.sh are written

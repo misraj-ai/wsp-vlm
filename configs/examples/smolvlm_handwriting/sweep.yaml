@@ -1,0 +1,17 @@
+# Decoding / prompt / resolution settings to compare on DEV before any agent run:
+#   python scripts/agent/decode_sweep.py --config configs/examples/smolvlm_handwriting/experiments/handwriting.yaml \
+#       --grid configs/examples/smolvlm_handwriting/sweep.yaml --n 100 --out sweep/smolvlm_handwriting
+- name: default_N5
+  protocol: {}
+- name: N4_resolution
+  processor_kwargs: {size: {longest_edge: 1536}}
+- name: N6_resolution
+  processor_kwargs: {size: {longest_edge: 2304}}
+- name: no_image_splitting
+  processor_kwargs: {size: {longest_edge: 1920}, do_image_splitting: false}
+- name: rep_penalty_1.1
+  protocol: {repetition_penalty: 1.1}
+- name: no_repeat_8gram
+  protocol: {no_repeat_ngram_size: 8}
+- name: arabic_prompt
+  tasks: {handwriting: {prompt: "انسخ النص العربي المكتوب بخط اليد في هذه الصورة كما هو، سطراً سطراً. أخرج النص فقط."}}

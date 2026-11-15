@@ -70,3 +70,29 @@ def test_qwen35_generate_and_capture(tmp_path, toy):
     assert {"lm.resid.0", "lm.resid.1", "lm.attn_out.0", "lm.attn_out.1", "vision.resid.0"} <= set(r["acts"])
     r2 = model_io.teacher_forced(m, p, d, items[0], "Extract the table.", "abc", {}, {"lm_resid": [1], "positions": "image"})
     assert r2["positions"].numel() > 0 and r2["acts"]["lm.resid.1"].shape[0] == r2["positions"].numel()
+
+
+@pytest.mark.skipif(importlib.util.find_spec("num2words") is None, reason="the SmolVLM processor needs num2words")
+def test_smolvlm_batching_resolution_and_capture(tmp_path):
+    """SmolVLM's processor reads a flat image list as images of the FIRST sample; the harness must pass one list
+    per sample. processor_kwargs must reach the processor (image resolution / splitting)."""
+    from PIL import Image
+
+    subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "agent", "make_toy.py"), "--out", str(tmp_path), "--arch", "smolvlm"],
+                   check=True, capture_output=True)
+    Image.new("RGB", (200, 60), "white").save(tmp_path / "wide.png")
+    Image.new("RGB", (40, 40), "gray").save(tmp_path / "small.png")
+    items = [{"id": "a", "task": "t", "image": str(tmp_path / "wide.png"), "prompt": "اقرأ النص."},
+             {"id": "b", "task": "t", "image": str(tmp_path / "small.png"), "prompt": "Read all of the handwritten text, line by line."}]
+    n_img = {}
+    for name, pk in (("split", {}), ("small", {"size": {"longest_edge": 32}})):
+        m, p = model_io.load_model({"path": str(tmp_path / "model"), "dtype": "float32", "device": "cpu", "processor_kwargs": pk})
+        d = model_io.discover(m)
+        assert d["lm_layers"] == "model.text_model.layers" and d["vision_root"] == "model.vision_model"
+        assert d["connector"] == ["model.connector"] and "model.text_model.norm.weight" in d["frozen"]
+        b2 = model_io.generate(m, p, items, {"t": {"prompt": "x"}}, {"max_new_tokens": 8, "batch_size": 2})
+        b1 = model_io.generate(m, p, items, {"t": {"prompt": "x"}}, {"max_new_tokens": 8, "batch_size": 1})
+        assert [x["text"] for x in b2] == [x["text"] for x in b1] and p._wsp_image_layout == "nested"
+        r = model_io.teacher_forced(m, p, d, items[0], "Read.", "abc", {}, {"lm_resid": [1], "positions": "image"})
+        n_img[name] = r["positions"].numel()
+    assert n_img["split"] > n_img["small"] > 0          # image splitting on the larger setting gives more image tokens

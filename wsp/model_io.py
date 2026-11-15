@@ -25,17 +25,27 @@ ATTN_KEYS = ("attn", "attention", "mixer")
 # --------------------------------------------------------------------------------------------
 # Loading
 # --------------------------------------------------------------------------------------------
+def load_processor(mcfg: dict):
+    import transformers as tf
+
+    kw = {"trust_remote_code": mcfg.get("trust_remote_code", False)}
+    if mcfg.get("revision"):
+        kw["revision"] = mcfg["revision"]
+    processor = tf.AutoProcessor.from_pretrained(mcfg["path"], **kw, **(mcfg.get("processor_kwargs") or {}))
+    tok = getattr(processor, "tokenizer", processor)
+    tok.padding_side = "left"
+    if tok.pad_token is None and tok.eos_token is not None:
+        tok.pad_token = tok.eos_token
+    return processor
+
+
 def load_model(mcfg: dict):
     import transformers as tf
 
     kw = {"trust_remote_code": mcfg.get("trust_remote_code", False)}
     if mcfg.get("revision"):
         kw["revision"] = mcfg["revision"]
-    processor = tf.AutoProcessor.from_pretrained(mcfg["path"], **kw)
-    tok = getattr(processor, "tokenizer", processor)
-    tok.padding_side = "left"
-    if tok.pad_token is None and tok.eos_token is not None:
-        tok.pad_token = tok.eos_token
+    processor = load_processor(mcfg)
     mkw = dict(kw, dtype=DTYPES[mcfg.get("dtype", "bfloat16")])
     if mcfg.get("attn_implementation"):
         mkw["attn_implementation"] = mcfg["attn_implementation"]
@@ -288,6 +298,34 @@ def _eos_ids(model, processor) -> set:
 
 
 # --------------------------------------------------------------------------------------------
+# Encoding (one image per sample)
+# --------------------------------------------------------------------------------------------
+def encode(processor, texts: list[str], imgs: list, **kw):
+    """processor(text=..., images=...) with one image per sample. Most processors take a flat image list;
+    Idefics3 / SmolVLM-style processors read a flat list as all images of the FIRST sample and need one
+    list per sample. The working layout is found once and remembered on the processor."""
+    mode = getattr(processor, "_wsp_image_layout", None)
+    if mode != "nested":
+        try:
+            out = processor(text=texts, images=imgs, return_tensors="pt", **kw)
+            if len(texts) > 1:
+                processor._wsp_image_layout = "flat"
+            return out
+        except (ValueError, TypeError, IndexError) as e:
+            if len(texts) == 1 or mode == "flat":
+                raise
+            first_err = e
+    try:
+        out = processor(text=texts, images=[[im] for im in imgs], return_tensors="pt", **kw)
+    except Exception:
+        if mode is None:
+            raise first_err  # noqa: F821 - the flat layout's error is the informative one
+        raise
+    processor._wsp_image_layout = "nested"
+    return out
+
+
+# --------------------------------------------------------------------------------------------
 # Generation
 # --------------------------------------------------------------------------------------------
 @torch.inference_mode()
@@ -311,7 +349,7 @@ def generate(model, processor, items: list[dict], tasks: dict, protocol: dict, c
         batch = items[b:b + bs]
         texts = [prompt_text(processor, it.get("prompt") or tasks[it["task"]]["prompt"], protocol, chat_kwargs) for it in batch]
         imgs = [open_image(it["image"], protocol.get("image_max_side")) for it in batch]
-        enc = processor(text=texts, images=imgs, return_tensors="pt", padding=True).to(dev)
+        enc = encode(processor, texts, imgs, padding=True).to(dev)
         if "pixel_values" in enc and enc["pixel_values"].is_floating_point():
             enc["pixel_values"] = enc["pixel_values"].to(next(model.parameters()).dtype)
         torch.manual_seed(int(protocol.get("seed", 0)) * 1_000_003 + b)
@@ -419,8 +457,8 @@ def teacher_forced(model, processor, disc, item: dict, prompt: str, target: str,
     ptxt = prompt_text(processor, prompt, protocol, chat_kwargs)
     full = ptxt + target + (tok.eos_token if append_eos and tok.eos_token else "")
     img = open_image(item["image"], protocol.get("image_max_side"))
-    enc_p = processor(text=[ptxt], images=[img], return_tensors="pt")
-    enc = processor(text=[full], images=[img], return_tensors="pt").to(dev)
+    enc_p = encode(processor, [ptxt], [img])
+    enc = encode(processor, [full], [img]).to(dev)
     if "pixel_values" in enc and enc["pixel_values"].is_floating_point():
         enc["pixel_values"] = enc["pixel_values"].to(next(model.parameters()).dtype)
     ids = enc["input_ids"][0]

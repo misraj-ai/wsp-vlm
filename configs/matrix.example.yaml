@@ -14,4 +14,7 @@ conditions:
   # - {name: claude_b25_lm_only, kind: agent, passes: 25, set: {editing: {allow_vision: false}}}
 runs_root: runs
 bundles_root: bundles
+results_root: results
+reports_root: reports
 configs_out: configs/generated
+scripts_out: .

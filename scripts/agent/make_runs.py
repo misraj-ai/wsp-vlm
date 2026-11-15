@@ -24,12 +24,13 @@ mdir = os.path.dirname(os.path.abspath(a.matrix))
 exp_dir = os.path.join(mdir, "experiments")
 out = M.get("configs_out", "configs/generated")
 runs_root, bundles_root = M.get("runs_root", "runs"), M.get("bundles_root", "bundles")
+results_root, reports_root = M.get("results_root", "results"), M.get("reports_root", "reports")
 agent_sh = ["#!/bin/bash", "# agent machine: runs every condition, then exports one bundle per run", "set -e",
             f"python scripts/agent/export_bundle.py --config {os.path.relpath(os.path.join(mdir, 'base.yaml'))} --base "
             f"--out {bundles_root}/base"]
 eval_sh = ["#!/bin/bash", "# evaluation machine: copy the bundles/ folder here first; the private data never leaves this machine",
            "set -e", f"PRIVATE={a.private}",
-           f"python scripts/eval/evaluate.py --bundle {bundles_root}/base.tar.gz --data $PRIVATE --out results/base"]
+           f"python scripts/eval/evaluate.py --bundle {bundles_root}/base.tar.gz --data $PRIVATE --out {results_root}/base"]
 n = 0
 for exp in M["experiments"]:
     if not os.path.exists(os.path.join(exp_dir, f"{exp}.yaml")):
@@ -57,12 +58,15 @@ for exp in M["experiments"]:
                 raise SystemExit(f"unknown condition kind {cond['kind']}")
             agent_sh.append(f"python scripts/agent/export_bundle.py --config {path} --out {bundles_root}/{exp}/{name}")
             eval_sh.append(f"python scripts/eval/evaluate.py --bundle {bundles_root}/{exp}/{name}.tar.gz --data $PRIVATE "
-                           f"--out results/{exp}/{name}")
-            per_exp.append(f"results/{exp}/{name}")
+                           f"--out {results_root}/{exp}/{name}")
+            per_exp.append(f"{results_root}/{exp}/{name}")
             n += 1
-    eval_sh.append(f"python scripts/eval/compare.py --base results/base --edited {' '.join(per_exp)} --out reports/{exp}.md")
-open("agent_runs.sh", "w").write("\n".join(agent_sh) + "\n")
-open("eval_runs.sh", "w").write("\n".join(eval_sh) + "\n")
-os.chmod("agent_runs.sh", 0o755)
-os.chmod("eval_runs.sh", 0o755)
-print(f"{n} run configs in {out}/; agent_runs.sh and eval_runs.sh written")
+    eval_sh.append(f"python scripts/eval/compare.py --base {results_root}/base --edited {' '.join(per_exp)} "
+                   f"--out {reports_root}/{exp}.md")
+sh_dir = M.get("scripts_out", ".")
+os.makedirs(sh_dir, exist_ok=True)
+for fn, lines in (("agent_runs.sh", agent_sh), ("eval_runs.sh", eval_sh)):
+    p = os.path.join(sh_dir, fn)
+    open(p, "w").write("\n".join(lines) + "\n")
+    os.chmod(p, 0o755)
+print(f"{n} run configs in {out}/; {os.path.join(sh_dir, 'agent_runs.sh')} and {os.path.join(sh_dir, 'eval_runs.sh')} written")

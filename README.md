@@ -47,7 +47,7 @@ AGENT MACHINE (public data only)                              EVALUATION MACHINE
 ```bash
 pip install -r requirements.txt
 apt-get install bubblewrap     # agent machine
-pytest tests                   # 34 tests, ~1.5 min on CPU; builds tiny Llava- and Qwen3.5-style VLMs offline
+pytest tests                   # 39 tests, ~1.5 min on CPU; builds tiny Llava- and Qwen3.5-style VLMs offline
 ```
 
 The tests cover:
@@ -62,7 +62,9 @@ The tests cover:
 - the full two-machine pipeline: mock agent run, both baselines, bundles, private evaluation, comparison;
 - the OpenRouter backend against a local fake server: request shape, streaming, retries, errors, and a full agent run over HTTP;
 - the Hugging Face upload script against a fake Hub: batch-by-batch uploads, skipping unchanged files, the index, the private default, refusals;
-- module discovery on Qwen3.5, Qwen3-VL, LightOnOCR, PaddleOCR-VL, SmolVLM, LFM2-VL, InternVL and Idefics3.
+- module discovery on Qwen3.5, Qwen3-VL, LightOnOCR, PaddleOCR-VL, SmolVLM, LFM2-VL, InternVL and Idefics3;
+- a tiny SmolVLM with its real processor: per-sample image batching, `processor_kwargs` reaching the processor, activation capture;
+- the shipped configs, including the SmolVLM example matrix.
 
 ## Experiments
 
@@ -82,6 +84,18 @@ it. It is told that the model's other tasks are also tested.
 
 [configs/matrix.example.yaml](configs/matrix.example.yaml) lists experiments × conditions × seeds.
 `make_runs.py` expands it into one config per run, plus one shell script for each machine.
+
+## Worked example: SmolVLM on Arabic handwriting, Claude via OpenRouter
+
+`configs/examples/smolvlm_handwriting/` is a complete single-task study you can copy:
+- `base.yaml`: SmolVLM, `processor_kwargs` for its resolution, the handwriting task only, the `openrouter` agent;
+- `experiments/handwriting.yaml`;
+- `matrix.yaml`: budgets 0 / 10 / 20 / 50, plus diffmeans and random baselines, 3 seeds;
+- `sweep.yaml`: resolution, decoding and prompt variants;
+- `prompts/task_v1.md`: an editable copy of the agent's task text.
+
+Before spending any budget, `scripts/agent/inspect_model.py --config <experiment config> --n 4` prints what the harness
+found in the model and how it answers a few practice images.
 
 ## Data format
 
@@ -266,6 +280,7 @@ model:
 
 Other model notes:
 - **Thinking templates.** If the model's template has a thinking switch, set it in `model.chat_template_kwargs`.
+- **Processor options** (e.g. SmolVLM's `size: {longest_edge: N*384}` or `do_image_splitting`) go in `model.processor_kwargs`. They are frozen into every bundle; `decode_sweep.py` can compare them.
 - **Qwen3.5 on GPU.** Install `causal-conv1d` and `flash-linear-attention`.
 - **Batching.** Run `pilot.py --check-batching`. If batched outputs differ from one-at-a-time outputs, set
   `protocol.batch_size: 1`; the evaluation uses the bundle's protocol, so it follows automatically.

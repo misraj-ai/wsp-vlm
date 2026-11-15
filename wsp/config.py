@@ -25,6 +25,7 @@ DEFAULTS = {
         "attn_implementation": None,  # "eager" enables attention-pattern reads
         "auto_class": None,           # force e.g. "AutoModelForImageTextToText"
         "chat_template_kwargs": {},   # passed to apply_chat_template (e.g. {"enable_thinking": false})
+        "processor_kwargs": {},       # passed to AutoProcessor.from_pretrained (e.g. SmolVLM {"size": {"longest_edge": 1920}})
         "discovery": {},              # regex overrides: lm_layers, vision_layers, connector, writer, attn_out
     },
     # The evaluation protocol. Fix it (scripts/agent/decode_sweep.py) BEFORE any agent run; it is the same for

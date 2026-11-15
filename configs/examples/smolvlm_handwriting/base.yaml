@@ -1,0 +1,83 @@
+# Study: SmolVLM on Arabic handwriting, agent = Claude through OpenRouter.
+# Everything every run of this study shares. Change values here, never per run (except what the matrix varies).
+
+weights_cache: cache/smolvlm_handwriting      # base weights exported once, shared read-only by all runs
+
+model:
+  path: HuggingFaceTB/SmolVLM-Instruct        # pick the SmolVLM size after the pilot (step 4 of the guide)
+  revision: <commit-sha>                      # pin it: the evaluation machine checks the base weights' hashes
+  dtype: bfloat16
+  device: cuda
+  # SmolVLM's resolution is a processor setting: longest_edge = N x 384 (the model card suggests N=5 for documents).
+  # Choose it with the decode sweep; it is frozen into every bundle.
+  processor_kwargs:
+    size: {longest_edge: 1920}
+  chat_template_kwargs: {}
+  discovery: {}
+
+protocol:                                     # fixed with decode_sweep.py BEFORE any agent run
+  max_new_tokens: 1024
+  do_sample: false
+  repetition_penalty: 1.0
+  no_repeat_ngram_size: 0
+  image_max_side: null
+  batch_size: 8                               # set 1 if pilot.py --check-batching reports differences
+  seed: 0
+  system_prompt: null
+
+tasks:                                        # only the task this study has data for
+  handwriting:
+    description: "reading Arabic handwriting"
+    prompt: "Transcribe the handwritten Arabic text in this image exactly, line by line. Output only the text."
+    metric: cer
+    arabic: true
+
+grading:
+  arabic_norm:
+    remove_diacritics: true
+    remove_tatweel: true
+    unify_alef: true
+    ya_maqsura: true
+    ta_marbuta: false
+    digits: western
+  loop: {tail_words: 200, ngram: 6, dup_threshold: 0.5}
+
+practice:
+  dir: data/public_handwriting                # handwriting.jsonl + images; PUBLIC data only
+  dev_fraction: 0.5
+
+budget:
+  passes: 20                                  # the matrix overrides this per condition (0 / 10 / 20 / 50 ...)
+  python_runs: 300
+  max_turns: 400
+  max_failed_requests: 40
+  must_use_all_passes: true
+  explain_every_step: true
+
+limits:
+  gen_max_items: 256
+  gen_both_max_items: 128
+  tf_max_items: 256
+  tf_max_tokens_total: 400000
+  kernel_timeout_s: 900
+
+editing:
+  allow_vision: true
+  allow_connector: true
+  frozen_patterns: []
+  refuse_rescale: true
+
+kernel:
+  sandbox: bwrap
+  mem_gb: 96
+
+agent:
+  backend: openrouter
+  model: anthropic/claude-opus-5              # copy the exact id from the model's OpenRouter page
+  max_tokens: 64000                           # reasoning tokens count against this on OpenRouter
+  extra:
+    reasoning: {effort: high}
+    # provider: {order: [Anthropic], allow_fallbacks: false}   # pin the provider so all seeds run on the same backend
+  timeout_s: 1800
+  handoff_every_turns: 40
+  # prompt_template: configs/examples/smolvlm_handwriting/prompts/task_v1.md   # only if you change the agent's task text
