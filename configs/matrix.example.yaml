@@ -9,6 +9,8 @@ conditions:
   - {name: diffmeans_b25, kind: diffmeans, passes: 25}
   - {name: random_b25,    kind: random,    passes: 25}
   # - {name: astra_b25, kind: agent, passes: 25, set: {agent: {backend: openai_compat, model: <name>, base_url: <url>}}}
+  # - {name: or_<model>_b25, kind: agent, passes: 25,
+  #    set: {agent: {backend: openrouter, model: <provider>/<model-id>, max_tokens: 64000, extra: {reasoning: {effort: high}}}}}
   # - {name: claude_b25_lm_only, kind: agent, passes: 25, set: {editing: {allow_vision: false}}}
 runs_root: runs
 bundles_root: bundles

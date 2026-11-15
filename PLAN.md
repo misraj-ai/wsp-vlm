@@ -81,7 +81,7 @@ Conditions, run inside every experiment with the same model, protocol, practice 
 |---|---|---|---|---|---|
 | A0 | none (unedited, best decoding setting) | – | – | – | the baseline every edit must beat (one bundle, shared by all experiments) |
 | A1 | Claude agent | 0 / 25 / 50 | all | 3 each | budget curve; 0 passes = weights + practice data only |
-| A2 | second agent (Astra or another, `openai_compat`) | 25 | all | 3 | is it the agent or the method? |
+| A2 | second agent (Astra or another; `openrouter` or `openai_compat` backend) | 25 | all | 3 | is it the agent or the method? Pin the OpenRouter provider so all seeds run on the same backend |
 | B1 | diffmeans script | 25 | LM writers | 3 | automated version of the paper's edit |
 | B2 | random direction (matched) | 25 | LM writers | 3 | does the direction carry information? |
 | B3 | diffmeans script, `--where vision` | 25 | vision writers | 3 | can the vision tower be steered the same way? |
@@ -163,6 +163,8 @@ is 5 experiments × 5 conditions (A1 at 0/25/50, B1, B2) × 3 seeds = 75 runs, p
 | The agent stalls or loops | turn and failure limits, handoffs with its notebook, resumable runs |
 
 ## What gets released (as the paper did)
+
+Bundles go to a Hugging Face repo with `scripts/tools/upload_hf.py`, batch by batch as conditions finish (private until release).
 
 Every run directory (prompts, replies, code and outputs, forward requests and results, edit manifests and tensors),
 the evaluation JSONs, the compare reports, the configs and this repository. The private set itself stays private;

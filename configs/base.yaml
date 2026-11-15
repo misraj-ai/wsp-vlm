@@ -83,7 +83,7 @@ kernel:
   extra_ro_binds: []         # e.g. a conda/venv path outside /usr, if the kernel's Python lives there
 
 agent:
-  backend: anthropic         # anthropic | openai_compat | scripted
+  backend: anthropic         # anthropic | openrouter | openai_compat | scripted
   model: claude-opus-5-5
   max_tokens: 32000
   extra: {}                  # passed to the API call as-is: put the reasoning/effort setting for your model here

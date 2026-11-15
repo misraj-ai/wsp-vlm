@@ -8,6 +8,7 @@ numpy
 pyyaml
 rapidfuzz              # fast edit distance (a pure-Python fallback exists)
 anthropic              # Claude backend
+huggingface_hub        # model download (via transformers) and scripts/tools/upload_hf.py
 # openai               # only for the openai_compat backend (other agents, e.g. Astra)
 # pytest               # tests
 # For Qwen3.5 on GPU, much faster linear-attention kernels:

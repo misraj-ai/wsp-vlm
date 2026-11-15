@@ -85,10 +85,15 @@ DEFAULTS = {
         "python": None,               # interpreter for the kernel (default: this one)
     },
     "agent": {
-        "backend": "anthropic",       # anthropic | openai_compat | scripted
+        "backend": "anthropic",       # anthropic | openrouter | openai_compat | scripted
         "model": "claude-opus-5-5",
         "max_tokens": 32000,
-        "extra": {},                  # passed through to the API call (e.g. a thinking / effort setting)
+        "extra": {},                  # passed through to the API call / merged into the openrouter request body
+        "base_url": None,             # openrouter (default https://openrouter.ai/api/v1) / openai_compat
+        "api_key_env": None,          # openrouter default OPENROUTER_API_KEY; openai_compat default OPENAI_API_KEY
+        "headers": {},                # openrouter: extra HTTP headers
+        "timeout_s": 1800,            # openrouter: read timeout per request (seconds)
+        "stream": True,               # openrouter: stream the reply (recommended for long replies)
         "handoff_every_turns": 40,
         "prompt_template": None,      # default: wsp/prompts/task_v1.md
         "script": None,               # scripted backend: path to a .py exposing replies(state) or a .json list

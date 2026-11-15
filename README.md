@@ -47,7 +47,7 @@ AGENT MACHINE (public data only)                              EVALUATION MACHINE
 ```bash
 pip install -r requirements.txt
 apt-get install bubblewrap     # agent machine
-pytest tests                   # 27 tests, ~1 min on CPU; builds tiny Llava- and Qwen3.5-style VLMs offline
+pytest tests                   # 34 tests, ~1.5 min on CPU; builds tiny Llava- and Qwen3.5-style VLMs offline
 ```
 
 The tests cover:
@@ -60,6 +60,8 @@ The tests cover:
 - the PRIVATE-marker guards;
 - a single-task experiment's scoping;
 - the full two-machine pipeline: mock agent run, both baselines, bundles, private evaluation, comparison;
+- the OpenRouter backend against a local fake server: request shape, streaming, retries, errors, and a full agent run over HTTP;
+- the Hugging Face upload script against a fake Hub: batch-by-batch uploads, skipping unchanged files, the index, the private default, refusals;
 - module discovery on Qwen3.5, Qwen3-VL, LightOnOCR, PaddleOCR-VL, SmolVLM, LFM2-VL, InternVL and Idefics3.
 
 ## Experiments
@@ -137,6 +139,39 @@ python scripts/eval/compare.py --base results/base --edited results/table/claude
 `reports/*.md|json` and `results/*/summary.json` hold aggregates only. `results/*/items.jsonl` holds model outputs
 on private items, so keep it on the evaluation machine.
 
+## Uploading bundles to Hugging Face (manual)
+
+`scripts/tools/upload_hf.py` is run by hand after a batch of runs; nothing in the run loop calls it. Typical use:
+upload the 10-pass bundles, then run the 25-pass condition, then upload again (only the new bundles go up).
+
+```bash
+export HF_TOKEN=hf_...      # or --hf-token (ends up in shell history), or a saved `hf auth login`
+python scripts/tools/upload_hf.py --input bundles --repo-id <user>/wsp-vlm-bundles --path-in-repo bundles --num-workers 8 --dry-run
+python scripts/tools/upload_hf.py --input bundles --repo-id <user>/wsp-vlm-bundles --path-in-repo bundles --num-workers 8
+```
+
+| Option | Meaning |
+|---|---|
+| `--input` | a bundle, or a folder searched recursively; the layout under it is kept in the repo |
+| `--repo-id`, `--repo-type` | target repo (`model` by default, or `dataset`) |
+| `--path-in-repo` | folder inside the repo |
+| `--num-workers` (alias `--num-process`) | parallel uploads (and parallel hashing) |
+| `--private` / `--public` | visibility when the repo is created (private by default; an existing repo keeps its setting) |
+| `--revision`, `--create-pr`, `--commit-message` | branch, open a PR instead of committing, message |
+| `--overwrite` | replace a file whose content changed at the same path (otherwise it is reported and skipped) |
+| `--include-reports` | also upload `summary.json` files and `compare.py` reports (aggregates only) |
+| `--dry-run` | check everything and list what would be uploaded |
+
+Each upload is one commit. A file already on the Hub with the same sha256 is skipped, so re-running is safe.
+`<path-in-repo>/index.jsonl` is merged and re-committed each time, with one line per bundle: run, experiment,
+condition, seed, passes used, edit digest, sha256 and upload time. A README is added if the repo has none.
+
+The script refuses:
+- any path under a `PRIVATE` marker;
+- every `*.jsonl` (per-item results hold outputs on private items);
+- any bundle whose archive holds anything besides `spec.json`, `run_info.json` and `submission/`;
+- any JSON report with per-item entries.
+
 ## What the agent gets (and the rules the harness enforces)
 
 The first message is generated from [wsp/prompts/task_v1.md](wsp/prompts/task_v1.md). Read `runs/<run>/meta/prompt.txt`
@@ -187,11 +222,30 @@ runs/<experiment>/<condition>_s<seed>/
 | Backend | Use | Settings |
 |---|---|---|
 | `anthropic` | Claude (default `claude-opus-5-5`) | `ANTHROPIC_API_KEY`; streaming. `agent.extra` is passed to the API call unchanged: put your reasoning/effort setting there, per the API docs for that model |
+| `openrouter` | any model on OpenRouter, through one key | `OPENROUTER_API_KEY`; `agent.model` = the OpenRouter model id; `agent.extra` is merged into the request body (e.g. `reasoning`, `provider`); `agent.headers`, `agent.timeout_s`, `agent.stream` (default on). Standard library only |
 | `openai_compat` | any OpenAI-compatible endpoint (another frontier model, or a local server) | `agent.base_url`, `agent.api_key_env`, `agent.extra` |
 | `scripted` | tests, or hand-written strategies through the same harness | `agent.script`: a .py file with `reply(turn, last_message, state)` |
 
+OpenRouter example (in a run config or as a matrix condition's `set:`):
+
+```yaml
+agent:
+  backend: openrouter
+  model: <provider>/<model-id>      # as listed on OpenRouter
+  max_tokens: 64000                 # reasoning tokens count against this on OpenRouter: leave room for the reply
+  extra:
+    reasoning: {effort: high}       # or {max_tokens: 32000}; not both
+    # provider: {order: [...], allow_fallbacks: false}   # pin the provider so every seed runs on the same backend
+```
+
+The backend streams the reply and retries rate limits, server errors, dropped connections and mid-stream provider
+errors. Bad requests, auth errors and missing credit stop the run with the API's message; re-running the same
+command resumes it. If a reply comes back empty because reasoning used up `max_tokens`, the run stops and says so,
+instead of sending the agent an empty turn. Each turn's `meta.json` records the usage, the provider that served it,
+and the generation id.
+
 The system message is one neutral line, as in the paper. Conversations restart every `handoff_every_turns` turns with
-the task, the agent's `notes.md`, its current edit and the budget status. API keys are used only by the driver; the
+the task, the agent's `notes.md`, its current edit and the budget status. API keys (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...) are used only by the driver; the
 sandbox starts with an empty environment.
 
 ## A new model
